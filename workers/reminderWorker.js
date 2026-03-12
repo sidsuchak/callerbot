@@ -16,8 +16,6 @@
  *   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
  */
 
-require("dotenv").config({ path: ".env.local" });
-
 const { createClient }              = require("@supabase/supabase-js");
 const { google }                    = require("googleapis");
 const twilio                        = require("twilio");
