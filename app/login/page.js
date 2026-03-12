@@ -137,8 +137,11 @@ export default function LoginPage() {
         </div>
 
         <p style={{ fontSize: "0.8rem", color: "var(--muted)", textAlign: "center" }}>
-          By signing in you agree to our Terms of Service and Privacy Policy.
-        </p>
+  By signing in you agree to our{" "}
+  <a href="/privacy" style={{ color: "var(--ink)", fontWeight: 600 }}>
+    Privacy Policy
+  </a>
+</p>
       </section>
     </main>
   );

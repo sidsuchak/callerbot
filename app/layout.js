@@ -1,8 +1,12 @@
+import { google } from "googleapis";
 import "./globals.css";
 
 export const metadata = {
   title: "CallerBot — Never Miss a Meeting",
   description: "Get a phone call 10 minutes before every meeting you've accepted.",
+  verification: {
+    google: 'Tn-C8-9LlHFNR8Lss2rV_3PITDlzWj1-zdlNlo_HPlY'
+  },
 };
 
 export default function RootLayout({ children }) {
