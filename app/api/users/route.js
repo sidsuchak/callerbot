@@ -3,13 +3,13 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { cookies } from "next/headers";
 
-function getUserId() {
-  const cookieStore = cookies();
+async function getUserId() {
+  const cookieStore = await cookies();
   return cookieStore.get("callerbot_user_id")?.value || null;
 }
 
 export async function POST(request) {
-  const userId = getUserId();
+  const userId = await getUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -42,7 +42,7 @@ export async function POST(request) {
 }
 
 export async function GET() {
-  const userId = getUserId();
+  const userId = await getUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
