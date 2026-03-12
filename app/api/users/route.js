@@ -5,7 +5,9 @@ import { cookies } from "next/headers";
 
 async function getUserId() {
   const cookieStore = await cookies();
-  return cookieStore.get("callerbot_user_id")?.value || null;
+  const id = cookieStore.get("callerbot_user_id")?.value;
+  console.log("callerbot_user_id cookie:", id);
+  return id || null;
 }
 
 export async function POST(request) {
@@ -35,6 +37,7 @@ export async function POST(request) {
     .eq("id", userId);
 
   if (error) {
+    console.error("Supabase update error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
@@ -54,6 +57,7 @@ export async function GET() {
     .single();
 
   if (error) {
+    console.error("Supabase select error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 

@@ -24,6 +24,8 @@ export async function GET(request) {
     const { data: profile } = await oauth2.userinfo.get();
     const email = profile.email;
 
+    console.log("OAuth callback for:", email);
+
     // Find or create Supabase user
     const { data: { users: existingUsers } } = await supabaseAdmin.auth.admin.listUsers();
     let supabaseUser = existingUsers?.find(u => u.email === email);
@@ -37,8 +39,10 @@ export async function GET(request) {
       supabaseUser = newUser.user;
     }
 
+    console.log("Supabase user ID:", supabaseUser.id);
+
     // Upsert user row with Google tokens
-    await supabaseAdmin
+    const { error: upsertError } = await supabaseAdmin
       .from("users")
       .upsert({
         id:                   supabaseUser.id,
@@ -52,15 +56,22 @@ export async function GET(request) {
         updated_at:  new Date().toISOString(),
       }, { onConflict: "id" });
 
-    // Set user id in a cookie so API routes can identify the user
+    if (upsertError) {
+      console.error("Upsert error:", upsertError);
+      throw upsertError;
+    }
+
+    // Set user id in a cookie
     const response = NextResponse.redirect(new URL("/onboarding", request.url));
     response.cookies.set("callerbot_user_id", supabaseUser.id, {
       httpOnly: true,
       path:     "/",
-      maxAge:   60 * 60 * 24 * 7,
+      maxAge:   60 * 60 * 24 * 7, // 7 days
       sameSite: "lax",
+      secure:   true, // required for https in production
     });
 
+    console.log("Cookie set, redirecting to onboarding");
     return response;
   } catch (err) {
     console.error("OAuth callback error:", err);
