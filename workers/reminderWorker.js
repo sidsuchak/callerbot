@@ -1,24 +1,11 @@
 #!/usr/bin/env node
 /**
  * CallerBot Reminder Worker
- * =========================
- * Runs as a separate long-lived process (not a Next.js route).
- * Polls all active users from Supabase every 60s and places
- * Twilio calls 10 minutes before their accepted meetings.
- *
- * Deploy this separately on Railway or Render as a background worker.
- *
- * Run locally:
- *   node workers/reminderWorker.js
- *
- * Required env vars (same .env.local):
- *   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
- *   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
  */
 
-const { createClient }              = require("@supabase/supabase-js");
-const { google }                    = require("googleapis");
-const twilio                        = require("twilio");
+const { createClient } = require("@supabase/supabase-js");
+const { google }       = require("googleapis");
+const twilio           = require("twilio");
 
 // ── Clients ──────────────────────────────────────────────
 const supabase = createClient(
@@ -32,8 +19,8 @@ const twilioClient = twilio(
 );
 
 // ── Config ───────────────────────────────────────────────
-const CHECK_INTERVAL_MS = 60 * 1000; // 60 seconds
-const WINDOW_SECONDS    = 60;        // ±60s trigger window
+const CHECK_INTERVAL_MS = 60 * 1000;
+const WINDOW_SECONDS    = 60;
 
 // ── Logging ──────────────────────────────────────────────
 function log(level, msg) {
@@ -50,16 +37,20 @@ function getOAuthClient() {
 }
 
 async function refreshTokenIfNeeded(user) {
-  const expiry = new Date(user.google_token_expiry);
-  if (expiry > new Date(Date.now() + 5 * 60 * 1000)) {
+  if (!user.google_refresh_token) {
+    throw new Error("No refresh token available for user " + user.email);
+  }
+
+  const expiry = user.google_token_expiry ? new Date(user.google_token_expiry) : null;
+  if (expiry && expiry > new Date(Date.now() + 5 * 60 * 1000)) {
     return user.google_access_token; // Still valid
   }
 
+  log("INFO", `Refreshing token for ${user.email}`);
   const oauthClient = getOAuthClient();
   oauthClient.setCredentials({ refresh_token: user.google_refresh_token });
   const { credentials } = await oauthClient.refreshAccessToken();
 
-  // Save new token to DB
   await supabase
     .from("users")
     .update({
@@ -68,6 +59,7 @@ async function refreshTokenIfNeeded(user) {
     })
     .eq("id", user.id);
 
+  log("INFO", `Token refreshed for ${user.email}`);
   return credentials.access_token;
 }
 
@@ -90,13 +82,28 @@ async function getAcceptedMeetings(user, accessToken) {
     orderBy:      "startTime",
   });
 
-  return (res.data.items || []).filter((event) => {
+  const allEvents = res.data.items || [];
+  log("INFO", `Found ${allEvents.length} total events for ${user.email}`);
+
+  const accepted = allEvents.filter((event) => {
     const organizer = event.organizer || {};
     const attendees = event.attendees || [];
-    if (organizer.email === user.calendar_id) return true;
+
+    if (organizer.email === user.calendar_id) {
+      log("INFO", `  ✓ "${event.summary}" — user is organizer`);
+      return true;
+    }
     const self = attendees.find((a) => a.email === user.calendar_id);
-    return self?.responseStatus === "accepted";
+    if (self?.responseStatus === "accepted") {
+      log("INFO", `  ✓ "${event.summary}" — user accepted`);
+      return true;
+    }
+    log("INFO", `  ✗ "${event.summary}" — not accepted (status: ${self?.responseStatus || "not invited"})`);
+    return false;
   });
+
+  log("INFO", `${accepted.length} accepted meeting(s) found for ${user.email}`);
+  return accepted;
 }
 
 // ── Twilio Call ──────────────────────────────────────────
@@ -167,6 +174,8 @@ async function checkAllUsers() {
 
   for (const user of users) {
     try {
+      log("INFO", `Processing ${user.email} | phone: ${user.phone_number} | reminder: ${user.reminder_minutes}min`);
+
       const accessToken = await refreshTokenIfNeeded(user);
       const meetings    = await getAcceptedMeetings(user, accessToken);
       const now         = new Date();
@@ -175,13 +184,19 @@ async function checkAllUsers() {
 
       for (const event of meetings) {
         const startTime = event.start?.dateTime ? new Date(event.start.dateTime) : null;
-        if (!startTime) continue;
+        if (!startTime) {
+          log("INFO", `  Skipping "${event.summary}" — all-day event`);
+          continue;
+        }
 
         const minutesUntil = (startTime - now) / 1000 / 60;
+        log("INFO", `  "${event.summary}" starts in ${minutesUntil.toFixed(1)} mins | window: ${minutes - window} to ${minutes + window}`);
 
         if (minutesUntil >= minutes - window && minutesUntil <= minutes + window) {
           const alreadyCalled = await wasEventCalled(user.id, event.id);
+          log("INFO", `  In window! Already called: ${alreadyCalled}`);
           if (!alreadyCalled) {
+            log("INFO", `  Placing call to ${user.phone_number}...`);
             const sid = await placeCall(user, event, startTime);
             await markEventCalled(user.id, event.id);
             log("INFO", `📞 Called ${user.phone_number} for "${event.summary}" | SID: ${sid}`);
